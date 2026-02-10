@@ -1,0 +1,64 @@
+name: Node.js CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+env:
+  CERTIFICATE_TEST_PASSWORD: ${{ secrets.CERTIFICATE_TEST_PASSWORD }}
+  CERTIFICATE_NAME: ${{ secrets.CERTIFICATE_NAME }}
+  RNC_EMISOR: ${{ secrets.RNC_EMISOR }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [22.x]
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: copy certificate
+        run: |
+          cd src/test_cert && 
+          curl --header 'Authorization: token ${{ secrets.CERTIFICATE_ACCESS_TOKEN }}' \
+          --header 'Accept: application/vnd.github.v3.raw' \
+          --remote-name \
+          --location https://raw.githubusercontent.com/victors1681/certificates/main/${{ secrets.CERTIFICATE_NAME }}
+      - run: cd src/test_cert && ls
+      - run: npm ci
+      - run: npm run build --if-present
+      - run: npm test
+      - run: rm -rf src/test_cert
+
+      # Publish to npm registry (primary)
+      - name: Setup Node.js for npm
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: "https://registry.npmjs.org"
+      - name: Publish to npm
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Publish to GitHub Packages (secondary)
+      - name: Setup Node.js for GitHub Packages
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: "https://npm.pkg.github.com"
+          scope: "@victors1681"
+      - name: Update package name for GitHub Packages
+        run: |
+          npm pkg set name="@victors1681/dgii-ecf"
+          npm pkg set publishConfig.registry="https://npm.pkg.github.com"
+      - name: Publish to GitHub Packages
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
